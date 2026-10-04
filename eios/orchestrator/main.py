@@ -24,6 +24,7 @@ from pydantic import BaseModel
 import config
 import db
 import flags
+import topology
 
 logging.basicConfig(
     level=config.LOG_LEVEL,
@@ -233,6 +234,67 @@ def get_flags() -> list[dict]:
     if not flags.available():
         raise HTTPException(status_code=503, detail="flagd config is not mounted")
     return flags.list_flags()
+
+
+@app.get("/api/services")
+def get_services(window: str | None = None) -> dict:
+    """Health for every microservice on the substrate.
+
+    Read straight from Prometheus at request time rather than from the events
+    table: this is the live view of the substrate, and going through ingest
+    would only show it at the sampling rate the taps happen to poll at.
+    """
+    view = topology.collect(window)
+    try:
+        counts = db.incident_counts_by_service()
+    except Exception:
+        log.exception("could not count incidents per service")
+        counts = {}
+
+    # Mark the service each open fault is aimed at. Several flags can target
+    # the same service, so the newest wins - open_faults is ordered for that.
+    try:
+        open_faults = db.open_faults()
+    except Exception:
+        log.exception("could not read open fault windows")
+        open_faults = []
+    aimed_at: dict[str, dict] = {}
+    for fault in reversed(open_faults):
+        if fault["expected_entity"]:
+            aimed_at[fault["expected_entity"]] = fault
+
+    for entry in view["services"]:
+        entry["incidents_24h"] = counts.get(entry["service"], 0)
+        entry["injected_fault"] = aimed_at.get(entry["service"])
+    view["open_faults"] = open_faults
+    return view
+
+
+@app.get("/api/services/graph")
+def get_service_graph(hours: int = Query(1, ge=1, le=24)) -> dict:
+    """Who calls whom, as Jaeger derives it from the traces it holds."""
+    return topology.graph(hours)
+
+
+@app.get("/api/services/{service}")
+def get_service(service: str, window: str | None = None) -> dict:
+    view = topology.collect(window)
+    found = next((s for s in view["services"] if s["service"] == service), None)
+    if not found:
+        raise HTTPException(
+            status_code=404, detail="No telemetry for a service by that name"
+        )
+
+    edges = topology.graph()
+    return {
+        "service": found,
+        "window": view["window"],
+        "operations": topology.operations(service, view["window"]),
+        "upstreams": [e["source"] for e in edges["edges"] if e["target"] == service],
+        "downstreams": [e["target"] for e in edges["edges"] if e["source"] == service],
+        "incidents": db.incidents_for_service(service),
+        "traces_url": f"{config.JAEGER_UI_URL}/search?service={service}",
+    }
 
 
 @app.get("/api/scoreboard")

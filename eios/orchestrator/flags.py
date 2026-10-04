@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import stat
 import tempfile
 import threading
 
@@ -30,13 +31,25 @@ def _load() -> dict:
 
 
 def _save(doc: dict) -> None:
-    """Write atomically so flagd never observes a half-written file."""
+    """Write atomically so flagd never observes a half-written file.
+
+    mkstemp creates its file 0600 and os.replace carries that mode onto the
+    target. flagd runs as a non-root user, so inheriting it locks flagd out of
+    its own config and it crash-loops on the next restart - with the damage
+    only showing up long after the write that caused it. Force the mode back
+    to readable before the file is moved into place.
+    """
     directory = os.path.dirname(CONFIG_PATH)
+    try:
+        mode = stat.S_IMODE(os.stat(CONFIG_PATH).st_mode) | 0o644
+    except OSError:
+        mode = 0o644
     fd, tmp = tempfile.mkstemp(dir=directory, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(doc, handle, indent=2)
             handle.write("\n")
+        os.chmod(tmp, mode)
         os.replace(tmp, CONFIG_PATH)
     except Exception:
         if os.path.exists(tmp):

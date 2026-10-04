@@ -46,6 +46,97 @@ export interface FaultWindow {
   notes: string | null;
 }
 
+export type ServiceStatus =
+  | "healthy"
+  | "degraded"
+  | "critical"
+  | "idle"
+  | "unknown";
+
+/** An open fault window, as attached to the service it targets. */
+export interface InjectedFault {
+  window_id: string;
+  flag_key: string;
+  variant: string | null;
+  started_at: string;
+  expected_domain: string | null;
+  expected_entity: string | null;
+}
+
+export interface ServiceHealth {
+  service: string;
+  status: ServiceStatus;
+  reason: string;
+  rate_per_sec: number | null;
+  error_rate_per_sec: number | null;
+  error_ratio: number | null;
+  latency_p95_ms: number | null;
+  latency_p99_ms: number | null;
+  cpu_ratio: number | null;
+  memory_ratio: number | null;
+  sources: string[];
+  incidents_24h: number;
+  /** Set when a fault window is open against this service. */
+  injected_fault: InjectedFault | null;
+}
+
+export interface ServicesView {
+  window: string;
+  services: ServiceHealth[];
+  degraded_sources: string[];
+  jaeger_ui: string;
+  open_faults: InjectedFault[];
+}
+
+export interface ServiceEdge {
+  source: string;
+  target: string;
+  calls: number;
+}
+
+export interface ServiceGraph {
+  edges: ServiceEdge[];
+  nodes: string[];
+  available: boolean;
+  reason: string | null;
+}
+
+export interface Operation {
+  span_name: string;
+  rate_per_sec: number;
+  error_rate_per_sec: number;
+  error_ratio: number | null;
+  latency_p95_ms: number | null;
+}
+
+/** The per-service endpoint returns a narrower incident row than /api/incidents:
+ *  no features, no evidence count, no window bounds. */
+export type ServiceIncident = Pick<
+  Incident,
+  | "incident_id"
+  | "domain"
+  | "entity_kind"
+  | "entity_id"
+  | "entity_service"
+  | "detected_at"
+  | "detector"
+  | "score"
+  | "severity"
+  | "title"
+  | "labels"
+  | "status"
+>;
+
+export interface ServiceDetail {
+  service: ServiceHealth;
+  window: string;
+  operations: Operation[];
+  upstreams: string[];
+  downstreams: string[];
+  incidents: ServiceIncident[];
+  traces_url: string;
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -70,6 +161,10 @@ export const api = {
   incidents: (limit = 50) => get<Incident[]>(`/api/incidents?limit=${limit}`),
   flags: () => get<Flag[]>("/api/flags"),
   faults: () => get<FaultWindow[]>("/api/faults"),
+  services: () => get<ServicesView>("/api/services"),
+  serviceGraph: (hours = 1) => get<ServiceGraph>(`/api/services/graph?hours=${hours}`),
+  service: (name: string) =>
+    get<ServiceDetail>(`/api/services/${encodeURIComponent(name)}`),
   startFault: (body: {
     flag_key: string;
     variant: string;

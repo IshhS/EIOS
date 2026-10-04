@@ -18,6 +18,9 @@
     --accent-foreground: 183 78% 20%;
     --destructive: 4 62% 45%;
     --destructive-foreground: 0 0% 100%;
+    /* Degraded sits between healthy and critical, so it needs its own token. */
+    --warning: 32 85% 38%;
+    --warning-foreground: 0 0% 100%;
     --border: 200 14% 86%;
     --input: 200 14% 86%;
     --ring: 183 78% 32%;
@@ -39,6 +42,8 @@
     --accent-foreground: 182 48% 72%;
     --destructive: 5 62% 61%;
     --destructive-foreground: 195 30% 8%;
+    --warning: 36 82% 58%;
+    --warning-foreground: 195 30% 8%;
     --border: 196 16% 20%;
     --input: 196 16% 20%;
     --ring: 182 48% 50%;
@@ -46,4 +51,58 @@
 
   * { @apply border-border; }
   body { @apply bg-background text-foreground; font-feature-settings: "cv02","cv03","cv04"; }
+}
+
+/* Themed scrollbar for panes that scroll natively rather than through Radix's
+   ScrollArea, which styles its own bar.
+
+   Deliberately NOT inside @layer components: Tailwind drops component-layer
+   rules it thinks are unused, and its scanner does not reliably associate
+   ::-webkit-scrollbar pseudo-element rules with the class that owns them. Plain
+   top-level CSS is always emitted.
+
+   Colours come from the same tokens as the rest of the app, so light and dark
+   both follow the palette instead of falling back to the OS default. */
+.scrollbar-themed {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+.scrollbar-themed::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+.scrollbar-themed::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-themed::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 9999px;
+  /* Transparent border plus content-box clipping insets the thumb, so it reads
+     as a slim pill rather than filling the full track height. */
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+.scrollbar-themed:hover::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.55);
+}
+
+.scrollbar-themed::-webkit-scrollbar-thumb:active {
+  background-color: hsl(var(--primary));
+}
+
+.scrollbar-themed::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Windows draws stepper arrows at both ends of a scrollbar. They are not part
+   of the track or thumb, so they survive the rules above and keep the bar
+   looking like an OS control; hide them explicitly. */
+.scrollbar-themed::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }

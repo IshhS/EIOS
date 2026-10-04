@@ -57,6 +57,34 @@ def evidence_events(incident_id: str) -> list[dict]:
     return _rows(sql, {"id": incident_id})
 
 
+def incidents_for_service(service: str, limit: int = 20) -> list[dict]:
+    """Incidents attributed to one service.
+
+    Matches entity_service or entity_id, because domain-C events key on the
+    container name while domain-B events carry the service that emitted them.
+    """
+    sql = """
+        SELECT incident_id, domain, entity_kind, entity_id, entity_service,
+               detected_at, detector, score, severity, title, labels, status
+        FROM incidents
+        WHERE entity_service = %(service)s OR entity_id = %(service)s
+        ORDER BY detected_at DESC
+        LIMIT %(limit)s
+    """
+    return _rows(sql, {"service": service, "limit": limit})
+
+
+def incident_counts_by_service(hours: int = 24) -> dict[str, int]:
+    """Open-incident counts keyed by service, to badge the health table."""
+    sql = """
+        SELECT coalesce(entity_service, entity_id) AS service, count(*) AS incidents
+        FROM incidents
+        WHERE detected_at > NOW() - make_interval(hours => %(hours)s::int)
+        GROUP BY 1
+    """
+    return {row["service"]: row["incidents"] for row in _rows(sql, {"hours": hours})}
+
+
 def events(limit: int = 100, domain: str | None = None) -> list[dict]:
     sql = """
         SELECT event_id, domain, source, observed_at, entity_kind, entity_id,
@@ -109,6 +137,22 @@ def fault_windows(limit: int = 50) -> list[dict]:
         LIMIT %(limit)s
     """
     return _rows(sql, {"limit": limit})
+
+
+def open_faults() -> list[dict]:
+    """Fault windows still running, newest first.
+
+    Used to mark the service a fault is aimed at, so an injected fault is
+    visible on the health table instead of only in the injection panel.
+    """
+    sql = """
+        SELECT window_id, flag_key, variant, started_at,
+               expected_domain, expected_entity
+        FROM fault_windows
+        WHERE ended_at IS NULL
+        ORDER BY started_at DESC
+    """
+    return _rows(sql)
 
 
 def start_fault(

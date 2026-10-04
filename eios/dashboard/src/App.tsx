@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Activity, AlertTriangle, Database, Radio, Zap } from "lucide-react";
 
+import { ServicePanel } from "@/components/ServicePanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   api,
   subscribeIncidents,
@@ -45,6 +47,27 @@ const DOMAIN_LABEL: Record<string, string> = {
   infrastructure: "C · Infrastructure",
   attack: "A · Attack",
 };
+
+/** The variant with the strongest effect.
+ *
+ * Flags list their variants unsorted, and in three different shapes:
+ * paymentFailure gives ["10%", "100%", "25%", ...], emailMemoryLeak gives
+ * ["10000x", "1000x", "100x", ...], and most others just ["on"]. Taking the
+ * first non-off one injects whichever happens to be listed first - for
+ * paymentFailure that is 10%, a fault too weak to see. Rank them instead.
+ */
+function strongestVariant(flag: Flag): string {
+  const candidates = flag.variants.filter((variant) => variant !== "off");
+  if (candidates.length === 0) return "on";
+  const ranked = candidates
+    .map((variant) => {
+      const scale = /^(\d+(?:\.\d+)?)\s*([%x])$/i.exec(variant);
+      if (scale) return { variant, weight: Number(scale[1]) };
+      return { variant, weight: variant === "on" ? 1 : 0 };
+    })
+    .sort((a, b) => b.weight - a.weight);
+  return ranked[0].variant;
+}
 
 function timeAgo(iso: string): string {
   const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -133,6 +156,7 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [unhealthy, setUnhealthy] = useState(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -175,7 +199,7 @@ export default function App() {
   const inject = async (flag: Flag) => {
     setBusy(flag.key);
     try {
-      const variant = flag.variants.find((v) => v !== "off") ?? "on";
+      const variant = strongestVariant(flag);
       await api.startFault({
         flag_key: flag.key,
         variant,
@@ -242,6 +266,20 @@ export default function App() {
           </Card>
         ) : null}
 
+        <Tabs defaultValue="operations" className="space-y-6">
+          <TabsList>
+            <TabsTrigger value="operations">Operations</TabsTrigger>
+            <TabsTrigger value="services" className="gap-2">
+              Services
+              {unhealthy > 0 ? (
+                <Badge variant="outline" className="px-1.5 text-[10px]">
+                  {unhealthy}
+                </Badge>
+              ) : null}
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="operations" className="space-y-6">
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile
             icon={Database}
@@ -273,8 +311,10 @@ export default function App() {
           />
         </section>
 
+        {/* min-w-0: grid items refuse to shrink below their content otherwise,
+            and a long span name in the feed would widen the whole page. */}
         <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
-          <Card>
+          <Card className="min-w-0">
             <CardHeader>
               <CardTitle className="text-base">Incident feed</CardTitle>
               <CardDescription>
@@ -298,7 +338,7 @@ export default function App() {
             </CardContent>
           </Card>
 
-          <div className="space-y-6">
+          <div className="min-w-0 space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Inject a fault</CardTitle>
@@ -327,6 +367,7 @@ export default function App() {
                           variant="outline"
                           disabled={busy === fault.window_id}
                           onClick={() => clearFault(fault.window_id)}
+                          className="shrink-0"
                         >
                           Stop
                         </Button>
@@ -359,8 +400,13 @@ export default function App() {
                             variant={flag.on ? "secondary" : "outline"}
                             disabled={busy === flag.key || flag.on}
                             onClick={() => inject(flag)}
+                            className="shrink-0"
                           >
-                            {flag.on ? "On" : "Inject"}
+                            {flag.on
+                              ? "On"
+                              : strongestVariant(flag) === "on"
+                                ? "Inject"
+                                : `Inject ${strongestVariant(flag)}`}
                           </Button>
                         </div>
                       ))
@@ -409,6 +455,12 @@ export default function App() {
             </Card>
           </div>
         </div>
+          </TabsContent>
+
+          <TabsContent value="services">
+            <ServicePanel onSummary={setUnhealthy} />
+          </TabsContent>
+        </Tabs>
       </main>
     </div>
   );

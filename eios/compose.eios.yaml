@@ -103,6 +103,13 @@ services:
       - EIOS_POSTGRES_DSN=postgresql://eios:eios@eios-postgres:5432/eios
       - EIOS_LOG_LEVEL=INFO
       - FLAGD_CONFIG=/etc/flagd/demo.flagd.json
+      # Service health and topology. Prometheus carries the span_metrics RED
+      # figures and docker_stats; Jaeger derives the call graph from traces.
+      - PROMETHEUS_URL=http://prometheus:9090
+      - JAEGER_URL=http://jaeger:16686
+      # Browser-facing, for the per-service trace links.
+      - JAEGER_UI_URL=http://127.0.0.1:8080/jaeger/ui
+      - EIOS_HEALTH_WINDOW=5m
     volumes:
       # Read-write: the orchestrator flips flags to inject faults, so a fault
       # window and the flag that caused it are recorded in one action.

@@ -105,3 +105,8 @@ refers to build contexts at `../eios`.
 Docker needs roughly 8 GB of memory for the full stack. If it is tight, drop
 `opensearch` and `telemetry-docs` from the observability layer — neither is a
 signal EIOS reads.
+
+docker compose -f compose.yaml -f compose.full.yaml -f compose.observability.yaml -f ../eios/compose.eios.yaml up -d
+
+.\eios\start.ps1   
+.\eios\start.ps1 -Demo 
