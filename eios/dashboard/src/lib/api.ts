@@ -109,8 +109,6 @@ export interface Operation {
   latency_p95_ms: number | null;
 }
 
-/** The per-service endpoint returns a narrower incident row than /api/incidents:
- *  no features, no evidence count, no window bounds. */
 export type ServiceIncident = Pick<
   Incident,
   | "incident_id"
@@ -137,16 +135,62 @@ export interface ServiceDetail {
   traces_url: string;
 }
 
+export interface SecurityStatus {
+  security_enabled: boolean;
+  rate_limiting?: {
+    requests_per_window: number;
+    window_seconds: number;
+  };
+  redaction_enabled?: boolean;
+  audit_integrity?: boolean;
+  cors_origins?: string[];
+  version?: string;
+}
+
+export interface SecurityAuditEntry {
+  entry_id?: number;
+  at: string;
+  actor: string;
+  action: string;
+  subject_kind?: string;
+  subject_id?: string;
+  detail?: Record<string, any>;
+  tenant_id?: string;
+  ip?: string;
+  request_id?: string;
+  integrity_hash?: string;
+}
+
+export interface SecurityAlert {
+  alert_id?: string;
+  at: string;
+  action: string;
+  actor: string;
+  ip: string;
+  detail?: Record<string, any>;
+  severity?: Severity;
+}
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
+  const apiKey = sessionStorage.getItem("eios_api_key");
+  const headers: Record<string, string> = {};
+  if (apiKey) headers["X-API-Key"] = apiKey;
+
+  const res = await fetch(`${BASE}${path}`, { headers });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json() as Promise<T>;
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
+  const apiKey = sessionStorage.getItem("eios_api_key");
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (apiKey) headers["X-API-Key"] = apiKey;
+
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
@@ -173,6 +217,11 @@ export const api = {
     notes?: string;
   }) => post<{ window_id: string }>("/api/faults/start", body),
   stopFault: (windowId: string) => post(`/api/faults/${windowId}/stop`),
+
+  // Security features from Rehan's repository
+  securityStatus: () => get<SecurityStatus>("/api/security/status"),
+  securityAlerts: () => get<SecurityAlert[]>("/api/security/alerts"),
+  securityAudit: () => get<SecurityAuditEntry[]>("/api/security/audit"),
 };
 
 /** Live incident feed. Reconnects on drop so a demo survives a restart. */

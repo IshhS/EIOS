@@ -214,11 +214,32 @@ export function FileSystemWindow({
         rawContent: `# EIOS Global Enterprise Governance\ncluster:\n  name: eios-core-mesh\ngovernance:\n  zero_trust: true\n  mtls_enforced: true`,
       },
       {
+        id: "compose.eios.security.yaml",
+        name: "compose.eios.security.yaml",
+        type: "file",
+        meta: "3.2 KB",
+        rawContent: `# EIOS Security Compose Extension\n# Authenticated Reverse Proxy, Rate Limiter, and Hash Chaining\nversion: '3.8'\nservices:\n  orchestrator:\n    environment:\n      - EIOS_API_KEY=\${EIOS_API_KEY}\n      - EIOS_RATE_LIMIT_REQUESTS=200\n      - EIOS_RATE_LIMIT_WINDOW=60\n      - EIOS_REDACTION_ENABLED=true\n      - EIOS_AUDIT_INTEGRITY_ENABLED=true`,
+      },
+      {
+        id: "SECURITY.md",
+        name: "SECURITY.md",
+        type: "file",
+        meta: "11.5 KB",
+        rawContent: `# EIOS Enterprise Security Architecture\n\n## Threat Model & Guarantees\n- **Authentication**: Constant-time comparison bearer / X-API-Key token validation.\n- **Data Sanitization**: PII & Secrets Redaction engine runs pre-ingest.\n- **Audit Ledger**: Cryptographic SHA-256 hash chaining on all governance events.\n- **Rate Limiting**: Sliding window flood prevention.\n- **Resource Guard**: Strict request payload memory caps (1MB).`,
+      },
+      {
+        id: "migrate_security.sql",
+        name: "migrate_security.sql",
+        type: "file",
+        meta: "1.8 KB",
+        rawContent: `-- Security Schema Extension\nALTER TABLE audit_log ADD COLUMN IF NOT EXISTS tenant_id TEXT;\nALTER TABLE audit_log ADD COLUMN IF NOT EXISTS ip TEXT;\nALTER TABLE audit_log ADD COLUMN IF NOT EXISTS request_id TEXT;\nALTER TABLE audit_log ADD COLUMN IF NOT EXISTS integrity_hash TEXT;\nCREATE INDEX IF NOT EXISTS idx_audit_log_hash ON audit_log (integrity_hash);`,
+      },
+      {
         id: "zero-trust-mesh.conf",
         name: "zero-trust-mesh.conf",
         type: "file",
         meta: "8.1 KB",
-        rawContent: `[mesh.security]\nstrict_spiffe_validation = true\nca_provider = "eios-internal-vault"`,
+        rawContent: `[mesh.security]\nstrict_spiffe_validation = true\nca_provider = "eios-internal-vault"\nrate_limit_per_minute = 200`,
       },
       {
         id: "slo-targets.json",

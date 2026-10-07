@@ -9,6 +9,8 @@ import { OSTaskbar } from "./OSTaskbar";
 import { ConfigViewerModal } from "./ConfigViewerModal";
 import { AIAssistantModal } from "./AIAssistantModal";
 import { ProcessMonitorModal } from "./ProcessMonitorModal";
+import { SecurityCenterWindow } from "./SecurityCenterWindow";
+import { ApplicationOnboardingModal } from "./ApplicationOnboardingModal";
 import {
   api,
   type ServicesView,
@@ -16,7 +18,19 @@ import {
   type Incident,
 } from "@/lib/api";
 
-export function EIOSDesktop() {
+interface EIOSDesktopProps {
+  initialOnboardingOpen?: boolean;
+  adminUser?: string;
+  onLockScreen?: () => void;
+  onReboot?: () => void;
+}
+
+export function EIOSDesktop({
+  initialOnboardingOpen = true,
+  adminUser = "admin",
+  onLockScreen,
+  onReboot,
+}: EIOSDesktopProps) {
   // Window open/close states
   const [windows, setWindows] = useState<Record<WindowId, boolean>>({
     filesystem: true,
@@ -43,6 +57,7 @@ export function EIOSDesktop() {
   const [aiInsightQuery, setAiInsightQuery] = useState<string | null>(null);
   const [showAIAssistant, setShowAIAssistant] = useState(false);
   const [showProcessMonitor, setShowProcessMonitor] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(initialOnboardingOpen);
 
   // RAM Saver / Eco Mode
   const [ecoMode, setEcoMode] = useState(true);
@@ -84,6 +99,10 @@ export function EIOSDesktop() {
       setShowAIAssistant(true);
       return;
     }
+    if (id === "integrations") {
+      setShowOnboarding(true);
+      return;
+    }
     setWindows((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
@@ -116,6 +135,8 @@ export function EIOSDesktop() {
         ecoMode={ecoMode}
         onToggleEco={() => setEcoMode(!ecoMode)}
         systemHealth={healthScore}
+        onOpenSecurity={() => handleToggleWindow("security")}
+        onOpenOnboarding={() => setShowOnboarding(true)}
       />
 
       {/* 2. Main Desktop Canvas (Left Icons + Center Windows + Right Sidebar) */}
@@ -137,6 +158,18 @@ export function EIOSDesktop() {
                 onOpenFile={(name, content) => setOpenedFile({ name, content })}
                 isMaximized={maximizedWindow === "filesystem"}
                 onToggleMaximize={() => handleToggleMaximize("filesystem")}
+              />
+            </div>
+          )}
+
+          {/* Security Center Window */}
+          {windows.security && (
+            <div className="w-full">
+              <SecurityCenterWindow
+                onClose={() => handleCloseWindow("security")}
+                onMinimize={() => handleCloseWindow("security")}
+                isMaximized={maximizedWindow === "security"}
+                onToggleMaximize={() => handleToggleMaximize("security")}
               />
             </div>
           )}
@@ -177,16 +210,23 @@ export function EIOSDesktop() {
         <OSRightSidebar
           onOpenSettings={() => handleToggleWindow("settings")}
           onOpenAlerts={() => setShowProcessMonitor(true)}
+          onOpenSecurity={() => handleToggleWindow("security")}
           onOpenAIInsight={(query) => {
             setAiInsightQuery(query);
             setShowAIAssistant(true);
           }}
-          onLockScreen={() => alert("EIOS Enterprise Terminal Locked. Re-enter credentials to resume.")}
-          onRestartStack={() => {
-            if (confirm("Restart EIOS stack services?")) {
-              loadTelemetry();
-            }
-          }}
+          onLockScreen={
+            onLockScreen ||
+            (() => alert("EIOS Enterprise Terminal Locked. Re-enter credentials to resume."))
+          }
+          onRestartStack={
+            onReboot ||
+            (() => {
+              if (confirm("Restart EIOS stack services?")) {
+                loadTelemetry();
+              }
+            })
+          }
           servicesRunningCount={activeServicesCount}
           totalServicesCount={totalServicesCount}
           healthScore={healthScore}
@@ -222,6 +262,12 @@ export function EIOSDesktop() {
           onClose={() => setShowProcessMonitor(false)}
         />
       )}
+
+      <ApplicationOnboardingModal
+        isOpen={showOnboarding}
+        onClose={() => setShowOnboarding(false)}
+        onComplete={() => setShowOnboarding(false)}
+      />
     </div>
   );
 }

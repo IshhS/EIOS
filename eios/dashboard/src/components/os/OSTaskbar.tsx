@@ -37,6 +37,7 @@ export function OSTaskbar({
     { id: "terminal", label: "Terminal", iconSymbol: ">_", color: "#54ACBF" },
     { id: "filesystem", label: "Files", iconSymbol: "📁", color: "#A7EBF2" },
     { id: "systemmonitor", label: "System Monitor", iconSymbol: "📊", color: "#54ACBF" },
+    { id: "integrations", label: "Workloads", iconSymbol: "📦", color: "#A7EBF2" },
     { id: "ai", label: "AI Copilot", iconSymbol: "🧠", color: "#A7EBF2" },
     { id: "workflows", label: "Workflows", iconSymbol: "⚙️", color: "#26658C" },
     { id: "security", label: "Security", iconSymbol: "🛡️", color: "#B5E3C8" },

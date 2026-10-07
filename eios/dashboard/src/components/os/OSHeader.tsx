@@ -5,15 +5,25 @@ import {
   Volume2,
   Battery,
   Zap,
+  ShieldCheck,
+  Box,
 } from "lucide-react";
 
 interface OSHeaderProps {
   ecoMode: boolean;
   onToggleEco: () => void;
   systemHealth?: number;
+  onOpenSecurity?: () => void;
+  onOpenOnboarding?: () => void;
 }
 
-export function OSHeader({ ecoMode, onToggleEco, systemHealth = 94 }: OSHeaderProps) {
+export function OSHeader({
+  ecoMode,
+  onToggleEco,
+  systemHealth = 94,
+  onOpenSecurity,
+  onOpenOnboarding,
+}: OSHeaderProps) {
   const [timeStr, setTimeStr] = useState("10:42 AM");
   const [dateStr, setDateStr] = useState("25 May 2025");
 
@@ -81,6 +91,24 @@ export function OSHeader({ ecoMode, onToggleEco, systemHealth = 94 }: OSHeaderPr
           <span className="h-1.5 w-1.5 rounded-full bg-[#6EAA90]" />
           <span>Health: {systemHealth}%</span>
         </div>
+
+        <button
+          onClick={onOpenSecurity}
+          title="Open EIOS Zero-Trust Security Center (Rehan Module)"
+          className="flex items-center gap-1.5 rounded-full border border-[#26658C] bg-[#02243d] px-2.5 py-0.5 text-[11px] text-[#A7EBF2] hover:bg-[#033457] hover:border-[#54ACBF] transition-colors"
+        >
+          <ShieldCheck className="h-3 w-3 text-[#54ACBF]" />
+          <span>Zero-Trust: Enforced</span>
+        </button>
+
+        <button
+          onClick={onOpenOnboarding}
+          title="Click to view discovered containers and OTel pipeline"
+          className="flex items-center gap-1.5 rounded-full border border-[#26658C] bg-[#02243d] px-2.5 py-0.5 text-[11px] text-[#A7EBF2] hover:bg-[#033457] hover:border-[#54ACBF] transition-colors"
+        >
+          <Box className="h-3 w-3 text-[#54ACBF]" />
+          <span>Workload: Online Boutique (34 Pods)</span>
+        </button>
       </div>
 
       {/* Right System Indicators & Clock */}

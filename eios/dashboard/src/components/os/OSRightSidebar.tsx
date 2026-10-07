@@ -13,6 +13,7 @@ import {
 interface OSRightSidebarProps {
   onOpenSettings?: () => void;
   onOpenAlerts?: () => void;
+  onOpenSecurity?: () => void;
   onOpenAIInsight?: (insight: string) => void;
   onLockScreen?: () => void;
   onRestartStack?: () => void;
@@ -24,6 +25,7 @@ interface OSRightSidebarProps {
 export function OSRightSidebar({
   onOpenSettings,
   onOpenAlerts,
+  onOpenSecurity,
   onOpenAIInsight,
   onLockScreen,
   onRestartStack,
@@ -197,7 +199,40 @@ export function OSRightSidebar({
         )}
       </div>
 
-      {/* 5. Quick Actions Power Bar (Solid Buttons) */}
+      {/* 5. Zero-Trust Security Module Card (Rehan Module Integration) */}
+      <div className="os-glass-card rounded-xl p-2.5 space-y-2 border border-[#0d2e49] bg-[#021424]">
+        <div className="flex items-center justify-between">
+          <span className="font-display text-xs font-bold text-slate-200">
+            Zero-Trust Mesh
+          </span>
+          <span className="text-[9px] font-mono text-emerald-300 bg-emerald-950/70 px-1.5 py-0.2 rounded border border-emerald-600/40">
+            SHA-256 Chained
+          </span>
+        </div>
+
+        <div className="space-y-1 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-400 text-[11px]">PII Redactor</span>
+            <span className="font-mono text-emerald-400 text-[11px]">Active</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-slate-400 text-[11px]">Rate Limiter</span>
+            <span className="font-mono text-slate-200 text-[11px]">200/60s</span>
+          </div>
+        </div>
+
+        {onOpenSecurity && (
+          <button
+            onClick={onOpenSecurity}
+            className="w-full rounded bg-[#02243d] py-1 text-[9.5px] font-medium text-[#A7EBF2] hover:bg-[#033457] border border-[#26658C] transition-colors flex items-center justify-center gap-1.5"
+          >
+            <ShieldAlert className="h-3 w-3 text-[#54ACBF]" />
+            <span>Open Security Center</span>
+          </button>
+        )}
+      </div>
+
+      {/* 6. Quick Actions Power Bar (Solid Buttons) */}
       <div className="grid grid-cols-4 gap-1 pt-0.5">
         <button
           onClick={onLockScreen}
