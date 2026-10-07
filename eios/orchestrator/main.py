@@ -27,6 +27,10 @@ import db
 import flags
 from middleware import SecurityMiddleware, RequestSizeLimitMiddleware
 from security_router import router as security_router
+from docker_router import router as docker_router
+from system_router import router as system_router
+from terminal_router import router as terminal_router
+from fs_router import router as fs_router
 
 logging.basicConfig(
     level=config.LOG_LEVEL,
@@ -136,6 +140,10 @@ app.add_middleware(
 )
 
 app.include_router(security_router)
+app.include_router(docker_router)
+app.include_router(system_router)
+app.include_router(terminal_router)
+app.include_router(fs_router)
 
 
 class StartFault(BaseModel):

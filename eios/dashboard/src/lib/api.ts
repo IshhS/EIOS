@@ -200,7 +200,164 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// ── Docker Container types ─────────────────────────────────────────────────
+export interface DockerContainer {
+  id: string;
+  full_id: string;
+  name: string;
+  image: string;
+  status: "running" | "stopped" | "paused" | "restarting" | "dead" | "created" | string;
+  state: string;
+  ports: string;
+  created: number;
+  uptime: string;
+  compose_service: string;
+  compose_project: string;
+  labels: Record<string, string>;
+  otlp_connected: boolean;
+  category: "app" | "infra" | "database" | string;
+}
+
+export interface ContainerStats {
+  id: string;
+  cpu_pct: number;
+  memory_bytes: number;
+  memory_mb: number;
+  memory_limit_mb: number;
+  memory_pct: number;
+  networks: Record<string, { rx_bytes: number; tx_bytes: number }>;
+}
+
+export interface DockerInfo {
+  containers: number;
+  containers_running: number;
+  containers_paused: number;
+  containers_stopped: number;
+  images: number;
+  server_version: string;
+  os: string;
+  architecture: string;
+  mem_total_gb: number;
+  cpus: number;
+}
+
+// ── System Metrics types ───────────────────────────────────────────────────
+export interface SystemMetrics {
+  cpu: {
+    percent: number;
+    per_core: number[];
+    count_logical: number;
+    count_physical: number;
+    freq_mhz: number | null;
+    freq_max_mhz: number | null;
+  };
+  memory: {
+    total_gb: number;
+    available_gb: number;
+    used_gb: number;
+    percent: number;
+    cached_gb: number;
+    buffers_gb: number;
+  };
+  swap: { total_gb: number; used_gb: number; percent: number };
+  disk: {
+    device: string;
+    mountpoint: string;
+    fstype: string;
+    total_gb: number;
+    used_gb: number;
+    free_gb: number;
+    percent: number;
+  }[];
+  network: {
+    rx_kbps: number;
+    tx_kbps: number;
+    interfaces: {
+      interface: string;
+      bytes_sent: number;
+      bytes_recv: number;
+    }[];
+  };
+  platform: {
+    system: string;
+    node: string;
+    release: string;
+    machine: string;
+    python: string;
+  };
+}
+
+export interface SystemProcess {
+  pid: number;
+  name: string;
+  cpu_pct: number;
+  mem_pct: number;
+  mem_mb: number;
+  status: string;
+  user: string;
+}
+
+// ── K8s types ─────────────────────────────────────────────────────────────
+export interface K8sWorkloads {
+  available: boolean;
+  reason?: string;
+  namespace?: string;
+  pods: {
+    name: string; namespace: string; phase: string;
+    ready: number; total_containers: number; node: string;
+    images: string[]; restart_count: number; pod_ip: string;
+  }[];
+  deployments: {
+    name: string; namespace: string; replicas: number;
+    ready_replicas: number; available_replicas: number; image: string;
+  }[];
+  services: {
+    name: string; namespace: string; type: string;
+    cluster_ip: string; ports: string;
+  }[];
+}
+
+// ── FS types ──────────────────────────────────────────────────────────────
+export interface FSEntry {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  size: number | null;
+  size_human: string | null;
+  modified: number;
+  extension: string;
+  mime: string;
+  is_text: boolean;
+}
+
+export interface FSListing {
+  path: string;
+  entries: FSEntry[];
+  total: number;
+}
+
+export interface FSFile {
+  path: string;
+  name: string;
+  content: string;
+  size: number;
+  size_human: string;
+  mime: string;
+  extension: string;
+  modified: number;
+}
+
+// ── Terminal types ─────────────────────────────────────────────────────────
+export interface TerminalResult {
+  command: string;
+  output: string;
+  exit_code: number;
+  timestamp: string;
+  duration_ms: number;
+}
+
 export const api = {
+  // Core EIOS
   stats: () => get<Stats>("/api/stats"),
   incidents: (limit = 50) => get<Incident[]>(`/api/incidents?limit=${limit}`),
   flags: () => get<Flag[]>("/api/flags"),
@@ -218,11 +375,45 @@ export const api = {
   }) => post<{ window_id: string }>("/api/faults/start", body),
   stopFault: (windowId: string) => post(`/api/faults/${windowId}/stop`),
 
-  // Security features from Rehan's repository
+  // Security (Rehan)
   securityStatus: () => get<SecurityStatus>("/api/security/status"),
   securityAlerts: () => get<SecurityAlert[]>("/api/security/alerts"),
   securityAudit: () => get<SecurityAuditEntry[]>("/api/security/audit"),
+
+  // Docker Engine — REAL container data
+  dockerContainers: (all = true) =>
+    get<DockerContainer[]>(`/api/docker/containers?all=${all}`),
+  dockerContainerStats: (id: string) =>
+    get<ContainerStats>(`/api/docker/containers/${id}/stats`),
+  dockerStats: () => get<ContainerStats[]>("/api/docker/stats"),
+  dockerInfo: () => get<DockerInfo>("/api/docker/info"),
+  dockerNetworks: () => get<{ id: string; name: string; driver: string; containers: number }[]>("/api/docker/networks"),
+  dockerStart: (id: string) => post(`/api/docker/containers/${id}/start`),
+  dockerStop: (id: string) => post(`/api/docker/containers/${id}/stop`),
+  dockerRestart: (id: string) => post(`/api/docker/containers/${id}/restart`),
+
+  // System Metrics — REAL host metrics
+  systemMetrics: () => get<SystemMetrics>("/api/system/metrics"),
+  systemProcesses: (limit = 20) => get<SystemProcess[]>(`/api/system/processes?limit=${limit}`),
+
+  // Kubernetes
+  k8sWorkloads: (namespace = "default") =>
+    get<K8sWorkloads>(`/api/k8s/workloads?namespace=${namespace}`),
+  k8sNamespaces: () => get<string[]>("/api/k8s/namespaces"),
+
+  // Terminal
+  terminalExec: (command: string) =>
+    post<TerminalResult>("/api/terminal/exec", { command }),
+  terminalHistory: (limit = 50) =>
+    get<TerminalResult[]>(`/api/terminal/history?limit=${limit}`),
+
+  // Filesystem (real EIOS workspace)
+  fsList: (path = "") => get<FSListing>(`/api/fs/list?path=${encodeURIComponent(path)}`),
+  fsRead: (path: string) => get<FSFile>(`/api/fs/read?path=${encodeURIComponent(path)}`),
+  fsTree: (depth = 3) => get<FSEntry>(`/api/fs/tree?depth=${depth}`),
+  fsInfo: () => get<{ root: string; exists: boolean; disk: { total_gb: number; used_gb: number; free_gb: number; percent: number } }>("/api/fs/info"),
 };
+
 
 /** Live incident feed. Reconnects on drop so a demo survives a restart. */
 export function subscribeIncidents(

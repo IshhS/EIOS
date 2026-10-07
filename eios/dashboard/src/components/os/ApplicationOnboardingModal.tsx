@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Layers,
   CheckCircle2,
@@ -21,7 +21,11 @@ import {
   AlertTriangle,
   Flame,
   TrendingUp,
+  Loader2,
+  RefreshCw,
+  WifiOff,
 } from "lucide-react";
+import { api, type DockerContainer } from "@/lib/api";
 
 interface ApplicationOnboardingModalProps {
   isOpen: boolean;
@@ -33,11 +37,12 @@ interface DiscoveredWorkload {
   name: string;
   image: string;
   category: "app" | "infra" | "database";
-  status: "running" | "healthy" | "starting";
+  status: "running" | "healthy" | "starting" | "stopped" | string;
   ports: string;
   cpu: string;
   memory: string;
   otlpConnected: boolean;
+  id?: string;
 }
 
 export function ApplicationOnboardingModal({
@@ -54,191 +59,75 @@ export function ApplicationOnboardingModal({
     "all" | "app" | "infra" | "database"
   >("all");
 
-  // Real discovered workloads matching the user's running Docker environment
-  const discoveredWorkloads: DiscoveredWorkload[] = [
-    {
-      name: "frontend-proxy",
-      image: "otel/demo:frontend-proxy",
-      category: "app",
-      status: "healthy",
-      ports: "8080:8080, 10000:10000",
-      cpu: "0.8%",
-      memory: "28 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "frontend",
-      image: "otel/demo:frontend (Next.js 14)",
-      category: "app",
-      status: "healthy",
-      ports: "62843:8080",
-      cpu: "1.4%",
-      memory: "112 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "checkout",
-      image: "otel/demo:checkout (Go 1.22)",
-      category: "app",
-      status: "healthy",
-      ports: "63418:5050",
-      cpu: "2.1%",
-      memory: "42 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "cart",
-      image: "otel/demo:cart (C# .NET 8)",
-      category: "app",
-      status: "running",
-      ports: "51621:7070",
-      cpu: "1.8%",
-      memory: "86 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "product-catalog",
-      image: "otel/demo:product-catalog (Go 1.22)",
-      category: "app",
-      status: "healthy",
-      ports: "54397:3550",
-      cpu: "0.6%",
-      memory: "34 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "currency",
-      image: "otel/demo:currency (C++ 20)",
-      category: "app",
-      status: "healthy",
-      ports: "63796:7001",
-      cpu: "0.4%",
-      memory: "24 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "payment",
-      image: "otel/demo:payment (Node.js 20)",
-      category: "app",
-      status: "healthy",
-      ports: "63793:50051",
-      cpu: "0.9%",
-      memory: "58 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "shipping",
-      image: "otel/demo:shipping (Rust Actix)",
-      category: "app",
-      status: "healthy",
-      ports: "58606:50050",
-      cpu: "0.5%",
-      memory: "18 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "email",
-      image: "otel/demo:email (Ruby 3.2)",
-      category: "app",
-      status: "healthy",
-      ports: "63794:6060",
-      cpu: "0.7%",
-      memory: "45 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "recommendation",
-      image: "otel/demo:recommendation (Python)",
-      category: "app",
-      status: "healthy",
-      ports: "51624:9001",
-      cpu: "3.2%",
-      memory: "135 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "ad",
-      image: "otel/demo:ad (Java 21)",
-      category: "app",
-      status: "healthy",
-      ports: "63797:9465",
-      cpu: "1.1%",
-      memory: "180 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "load-generator",
-      image: "otel/demo:load-generator (Locust)",
-      category: "app",
-      status: "healthy",
-      ports: "53968:8089",
-      cpu: "4.5%",
-      memory: "94 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "otel-collector",
-      image: "otel/opentelemetry-collector-contrib:0.104.0",
-      category: "infra",
-      status: "running",
-      ports: "4317:4317 (gRPC), 4318:4318 (HTTP)",
-      cpu: "1.2%",
-      memory: "64 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "jaeger",
-      image: "jaegertracing/all-in-one:latest",
-      category: "infra",
-      status: "running",
-      ports: "16686:16686, 4317:4317",
-      cpu: "1.0%",
-      memory: "92 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "prometheus",
-      image: "prom/prometheus:latest",
-      category: "infra",
-      status: "running",
-      ports: "9090:9090",
-      cpu: "1.5%",
-      memory: "140 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "kafka",
-      image: "confluentinc/cp-kafka:7.6.0",
-      category: "infra",
-      status: "healthy",
-      ports: "9092:9092",
-      cpu: "2.0%",
-      memory: "310 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "eios-postgres",
-      image: "postgres:16-alpine",
-      category: "database",
-      status: "healthy",
-      ports: "5433:5432",
-      cpu: "0.8%",
-      memory: "78 MB",
-      otlpConnected: true,
-    },
-    {
-      name: "valkey-cart",
-      image: "valkey/valkey:7.2-alpine",
-      category: "database",
-      status: "healthy",
-      ports: "57683:6379",
-      cpu: "0.4%",
-      memory: "16 MB",
-      otlpConnected: true,
-    },
-  ];
+  // ── Real Docker container discovery ───────────────────────────────────────
+  const [discoveredWorkloads, setDiscoveredWorkloads] = useState<DiscoveredWorkload[]>([]);
+  const [dockerLoading, setDockerLoading] = useState(false);
+  const [dockerError, setDockerError] = useState<string | null>(null);
+  const [dockerInfo, setDockerInfo] = useState<{ containers_running: number; server_version: string } | null>(null);
+
+  // Convert DockerContainer → DiscoveredWorkload
+  const toWorkload = (c: DockerContainer): DiscoveredWorkload => ({
+    id: c.id,
+    name: c.name,
+    image: c.image,
+    category: (c.category as "app" | "infra" | "database") ?? "app",
+    status: c.state === "running" ? "running" : c.state === "exited" ? "stopped" : c.state as any,
+    ports: c.ports || "—",
+    cpu: "—",       // will be filled from stats
+    memory: "—",
+    otlpConnected: c.otlp_connected,
+  });
+
+  const discoverContainers = useCallback(async () => {
+    setDockerLoading(true);
+    setDockerError(null);
+    try {
+      const [containers, info] = await Promise.all([
+        api.dockerContainers(true),
+        api.dockerInfo().catch(() => null),
+      ]);
+      setDiscoveredWorkloads(containers.map(toWorkload));
+      if (info) setDockerInfo({ containers_running: info.containers_running, server_version: info.server_version });
+
+      // Fetch live stats for running containers (non-blocking)
+      const runningIds = containers.filter(c => c.state === "running").map(c => c.id);
+      if (runningIds.length > 0) {
+        try {
+          const allStats = await api.dockerStats();
+          const statsMap = Object.fromEntries(allStats.map(s => [s.id, s]));
+          setDiscoveredWorkloads(prev =>
+            prev.map(w => {
+              const s = w.id ? statsMap[w.id] : undefined;
+              if (!s) return w;
+              return {
+                ...w,
+                cpu: `${s.cpu_pct.toFixed(1)}%`,
+                memory: `${s.memory_mb.toFixed(0)} MB`,
+              };
+            })
+          );
+        } catch {
+          // Stats are best-effort; silently ignore
+        }
+      }
+    } catch (err: any) {
+      setDockerError(err?.message ?? "Docker Engine not reachable");
+      // Graceful fallback: show empty state, not crash
+      setDiscoveredWorkloads([]);
+    } finally {
+      setDockerLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen && currentStep === "discover") {
+      discoverContainers();
+    }
+  }, [isOpen, currentStep, discoverContainers]);
+  // ──────────────────────────────────────────────────────────────────────────
 
   // Pipeline Agent Animation Stages
+
   const [activePipelineStage, setActivePipelineStage] = useState(0);
 
   const pipelineStages = [
@@ -410,24 +299,56 @@ export function ApplicationOnboardingModal({
           {currentStep === "discover" && (
             <div className="space-y-4">
               <div className="rounded-xl border border-[#26658C]/70 bg-[#021324] p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div>
+                <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                    {dockerLoading ? (
+                      <Loader2 className="h-3 w-3 text-[#54ACBF] animate-spin" />
+                    ) : dockerError ? (
+                      <WifiOff className="h-3 w-3 text-[#F08A7C]" />
+                    ) : (
+                      <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                    )}
                     <h3 className="font-display text-sm font-bold text-white">
-                      Local Docker & Kubernetes Environment Discovered
+                      {dockerLoading
+                        ? "Scanning Docker Engine..."
+                        : dockerError
+                        ? "Docker Engine Unreachable"
+                        : `Docker Engine Connected${dockerInfo ? ` · v${dockerInfo.server_version}` : ""}`}
                     </h3>
                   </div>
                   <p className="mt-1 text-xs text-slate-300">
-                    EIOS automatically probed the local socket and detected <strong>34 active microservices</strong> belonging to the <strong>OpenTelemetry Online Boutique</strong> stack.
+                    {dockerLoading
+                      ? "Probing Docker socket for running containers and workloads..."
+                      : dockerError
+                      ? `${dockerError}. Ensure Docker Desktop is running and the daemon is accessible.`
+                      : discoveredWorkloads.length > 0
+                      ? `EIOS discovered ${discoveredWorkloads.length} containers (${discoveredWorkloads.filter(w => w.status === "running").length} running, ${discoveredWorkloads.filter(w => w.status === "stopped").length} stopped).`
+                      : "No containers found. Start the OpenTelemetry Demo stack and refresh."}
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="rounded-lg bg-emerald-950/80 px-2.5 py-1 text-xs font-mono text-emerald-300 border border-emerald-500/40">
-                    34 Pods Online
-                  </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  {!dockerLoading && discoveredWorkloads.length > 0 && (
+                    <span className="rounded-lg bg-emerald-950/80 px-2.5 py-1 text-xs font-mono text-emerald-300 border border-emerald-500/40">
+                      {discoveredWorkloads.filter(w => w.status === "running").length} Running
+                    </span>
+                  )}
+                  {dockerInfo && (
+                    <span className="rounded-lg bg-[#02243d] px-2.5 py-1 text-xs font-mono text-[#A7EBF2] border border-[#26658C]/40">
+                      {dockerInfo.containers_running} Active
+                    </span>
+                  )}
+                  <button
+                    onClick={discoverContainers}
+                    disabled={dockerLoading}
+                    className="flex items-center gap-1.5 rounded-lg bg-[#02243d] hover:bg-[#023859] border border-[#26658C]/60 px-3 py-1.5 text-xs text-[#A7EBF2] transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${dockerLoading ? "animate-spin" : ""}`} />
+                    Refresh
+                  </button>
                 </div>
               </div>
+
 
               {/* Filters */}
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
@@ -473,36 +394,69 @@ export function ApplicationOnboardingModal({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#0d2e49]">
-                    {filteredWorkloads.map((workload) => (
-                      <tr
-                        key={workload.name}
-                        className="hover:bg-[#03182b] transition-colors"
-                      >
-                        <td className="py-2 px-3 font-semibold text-slate-200 flex items-center gap-2">
-                          <Box className="h-3 w-3 text-[#54ACBF]" />
-                          <span>{workload.name}</span>
-                        </td>
-                        <td className="py-2 px-3 text-slate-400 truncate max-w-[180px]">
-                          {workload.image}
-                        </td>
-                        <td className="py-2 px-3">
-                          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-950/70 text-emerald-300 border border-emerald-600/30">
-                            <span className="h-1 w-1 rounded-full bg-emerald-400" />
-                            {workload.status}
-                          </span>
-                        </td>
-                        <td className="py-2 px-3 text-[#A7EBF2]">
-                          {workload.ports}
-                        </td>
-                        <td className="py-2 px-3 text-slate-400">
-                          {workload.cpu} • {workload.memory}
-                        </td>
-                        <td className="py-2 px-3 text-emerald-400 font-bold">
-                          ✓ Ready
+                    {dockerLoading ? (
+                      // Loading skeleton rows
+                      Array.from({ length: 6 }).map((_, i) => (
+                        <tr key={i} className="animate-pulse">
+                          <td className="py-2 px-3"><div className="h-3 w-32 bg-[#02243d] rounded" /></td>
+                          <td className="py-2 px-3"><div className="h-3 w-40 bg-[#02243d] rounded" /></td>
+                          <td className="py-2 px-3"><div className="h-3 w-16 bg-[#02243d] rounded" /></td>
+                          <td className="py-2 px-3"><div className="h-3 w-24 bg-[#02243d] rounded" /></td>
+                          <td className="py-2 px-3"><div className="h-3 w-20 bg-[#02243d] rounded" /></td>
+                          <td className="py-2 px-3"><div className="h-3 w-12 bg-[#02243d] rounded" /></td>
+                        </tr>
+                      ))
+                    ) : filteredWorkloads.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-10 text-center text-slate-500">
+                          {dockerError
+                            ? "⚠ Docker Engine not reachable. Start Docker Desktop and click Refresh."
+                            : discoveredWorkloads.length === 0
+                            ? "No containers found. Start the OpenTelemetry Demo stack and click Refresh."
+                            : "No containers match the current filter."}
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      filteredWorkloads.map((workload) => {
+                        const isRunning = workload.status === "running" || workload.status === "healthy";
+                        const isStopped = workload.status === "stopped" || workload.status === "exited";
+                        return (
+                          <tr key={workload.name} className="hover:bg-[#03182b] transition-colors">
+                            <td className="py-2 px-3 font-semibold text-slate-200 flex items-center gap-2">
+                              <Box className="h-3 w-3 text-[#54ACBF]" />
+                              <span>{workload.name}</span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-400 truncate max-w-[180px]">
+                              {workload.image}
+                            </td>
+                            <td className="py-2 px-3">
+                              <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border ${
+                                isRunning
+                                  ? "bg-emerald-950/70 text-emerald-300 border-emerald-600/30"
+                                  : isStopped
+                                  ? "bg-slate-900/70 text-slate-400 border-slate-600/30"
+                                  : "bg-yellow-950/70 text-yellow-300 border-yellow-600/30"
+                              }`}>
+                                <span className={`h-1 w-1 rounded-full ${isRunning ? "bg-emerald-400" : isStopped ? "bg-slate-500" : "bg-yellow-400"}`} />
+                                {workload.status}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-[#A7EBF2]">
+                              {workload.ports}
+                            </td>
+                            <td className="py-2 px-3 text-slate-400">
+                              {workload.cpu} • {workload.memory}
+                            </td>
+
+                            <td className="py-2 px-3 text-emerald-400 font-bold">
+                              ✓ Ready
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
+
                 </table>
               </div>
 
