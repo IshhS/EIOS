@@ -7,7 +7,7 @@ from starlette.responses import JSONResponse
 
 log = logging.getLogger("eios.security")
 _API_KEY = os.getenv("EIOS_API_KEY", "")
-_SKIP_AUTH = {"/health", "/ws", "/api/security/status"}
+_SKIP_AUTH = {"/health", "/ws", "/api/security/status", "/api/auth/login", "/api/auth/register"}
 _MAX_BYTES = int(os.getenv("EIOS_MAX_REQUEST_BYTES", 1_048_576))
 
 

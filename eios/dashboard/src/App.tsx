@@ -17,8 +17,9 @@ export default function App() {
 
       {stage === "login" && (
         <EIOSLoginScreen
-          onLoginSuccess={(user) => {
+          onLoginSuccess={(user, key) => {
             setAdminUser(user);
+            if (key) sessionStorage.setItem("eios_api_key", key);
             setStage("desktop");
           }}
         />

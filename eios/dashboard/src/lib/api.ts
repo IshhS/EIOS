@@ -412,6 +412,28 @@ export const api = {
   fsRead: (path: string) => get<FSFile>(`/api/fs/read?path=${encodeURIComponent(path)}`),
   fsTree: (depth = 3) => get<FSEntry>(`/api/fs/tree?depth=${depth}`),
   fsInfo: () => get<{ root: string; exists: boolean; disk: { total_gb: number; used_gb: number; free_gb: number; percent: number } }>("/api/fs/info"),
+
+  // Intelligence & Agents
+  aiChat: (query: string, context?: any) =>
+    post<{ reply: string; timestamp: string; context_snapshot: any }>("/api/ai/chat", { query, context }),
+  cases: () => get<any[]>("/api/cases"),
+  case: (id: string) => get<any>(`/api/cases/${id}`),
+  approvals: () => get<any[]>("/api/approvals"),
+  executeApproval: (id: string, decision: string, notes?: string) =>
+    post<any>(`/api/approvals/${id}/action`, { decision, notes }),
+
+  // Workload Management & OTel Pipeline
+  connectWorkload: (body: { workload_type?: string; name?: string; collector_endpoint?: string; prometheus_url?: string; jaeger_url?: string }) =>
+    post<any>("/api/workloads/connect", body),
+  workloadStatus: () => get<any>("/api/workloads/status"),
+
+  // Administrator Authentication
+  authLogin: (username: string, password: string, api_key?: string) =>
+    post<{ status: string; user: string; role: string; token: string; api_key: string }>("/api/auth/login", { username, password, api_key }),
+  authRegister: (username: string, password: string, role?: string) =>
+    post<{ status: string; user: string; role: string; message: string }>("/api/auth/register", { username, password, role }),
+  authMe: (username = "admin") =>
+    get<{ username: string; role: string; status: string }>(`/api/auth/me?username=${encodeURIComponent(username)}`),
 };
 
 

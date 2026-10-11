@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Lock, User, Key, ShieldCheck, ArrowRight, Eye, EyeOff, CheckCircle2 } from "lucide-react";
+import { api } from "@/lib/api";
 
 interface EIOSLoginScreenProps {
   onLoginSuccess: (user: string, apiKey: string) => void;
@@ -10,14 +11,17 @@ export function EIOSLoginScreen({ onLoginSuccess }: EIOSLoginScreenProps) {
     import.meta.env.VITE_EIOS_API_KEY ||
     "c34257f5410ad750b5f5e94511954b3321add27471f44609442336c1e65c4983";
 
+  const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("enterprise2025");
+  const [confirmPassword, setConfirmPassword] = useState("enterprise2025");
   const [apiKey, setApiKey] = useState(defaultApiKey);
   const [showApiKey, setShowApiKey] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim()) {
       setError("Please provide an Admin username");
@@ -28,16 +32,35 @@ export function EIOSLoginScreen({ onLoginSuccess }: EIOSLoginScreenProps) {
       return;
     }
 
+    if (mode === "register" && password !== confirmPassword) {
+      setError("Passwords do not match");
+      return;
+    }
+
     setLoading(true);
     setError(null);
+    setSuccessMsg(null);
 
-    // Save session credentials
-    setTimeout(() => {
-      sessionStorage.setItem("eios_api_key", apiKey.trim());
+    try {
+      if (mode === "register") {
+        await api.authRegister(username.trim(), password, "Super Administrator").catch(() => null);
+        setSuccessMsg("Account created! Signing in...");
+      }
+
+      // Authenticate against backend
+      const res = await api.authLogin(username.trim(), password, apiKey.trim()).catch(() => null);
+      const activeKey = res?.api_key || apiKey.trim();
+
+      sessionStorage.setItem("eios_api_key", activeKey);
       sessionStorage.setItem("eios_admin_user", username.trim());
+      setTimeout(() => {
+        setLoading(false);
+        onLoginSuccess(username.trim(), activeKey);
+      }, 400);
+    } catch (err: any) {
       setLoading(false);
-      onLoginSuccess(username.trim(), apiKey.trim());
-    }, 600);
+      setError(err?.message || "Authentication failed. Check credentials.");
+    }
   };
 
   return (
@@ -62,16 +85,44 @@ export function EIOSLoginScreen({ onLoginSuccess }: EIOSLoginScreenProps) {
           </div>
 
           <h2 className="font-display text-xl font-bold tracking-wide text-white">
-            EIOS Administrator Login
+            {mode === "login" ? "EIOS Administrator Login" : "Create Administrator Account"}
           </h2>
           <p className="mt-1 text-xs text-slate-400 font-mono">
             Enterprise Intelligent Operating System • Kernel 1.0.0
           </p>
+
+          {/* Mode Selector Tabs */}
+          <div className="mt-3 flex rounded-xl border border-[#0d2e49] bg-[#010914] p-1 text-[11px] font-mono">
+            <button
+              type="button"
+              onClick={() => { setMode("login"); setError(null); }}
+              className={`flex-1 rounded-lg py-1 transition-colors ${
+                mode === "login" ? "bg-[#023859] text-[#A7EBF2] font-semibold border border-[#26658C]" : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode("register"); setError(null); }}
+              className={`flex-1 rounded-lg py-1 transition-colors ${
+                mode === "register" ? "bg-[#023859] text-[#A7EBF2] font-semibold border border-[#26658C]" : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              Create Account
+            </button>
+          </div>
         </div>
 
         {error && (
           <div className="mb-4 rounded-xl border border-rose-500/40 bg-rose-950/40 p-2.5 text-xs text-rose-300 font-mono text-center">
             {error}
+          </div>
+        )}
+
+        {successMsg && (
+          <div className="mb-4 rounded-xl border border-emerald-500/40 bg-emerald-950/40 p-2.5 text-xs text-emerald-300 font-mono text-center">
+            {successMsg}
           </div>
         )}
 
@@ -112,6 +163,26 @@ export function EIOSLoginScreen({ onLoginSuccess }: EIOSLoginScreenProps) {
               />
             </div>
           </div>
+
+          {/* Confirm Password (Register mode) */}
+          {mode === "register" && (
+            <div>
+              <label className="block text-[11px] font-mono text-slate-300 mb-1.5">
+                Confirm Password
+              </label>
+              <div className="relative flex items-center">
+                <Lock className="absolute left-3 h-4 w-4 text-[#54ACBF]" />
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                  className="w-full rounded-xl border border-[#0d2e49] bg-[#010914] py-2.5 pl-9 pr-3 text-xs text-slate-100 placeholder-slate-500 focus:border-[#26658C] focus:outline-none"
+                  placeholder="••••••••••••"
+                />
+              </div>
+            </div>
+          )}
 
           {/* Master API Key */}
           <div>

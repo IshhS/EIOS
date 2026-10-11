@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   Search,
   ArrowLeft,
@@ -12,6 +12,7 @@ import {
   X,
   HardDrive,
 } from "lucide-react";
+import { api, type FSEntry } from "@/lib/api";
 
 export interface FileItem {
   id: string;
@@ -330,9 +331,51 @@ export function FileSystemWindow({
     { id: "temp", label: "temp", desc: "Intermediate Cache" },
   ];
 
+  const [realFiles, setRealFiles] = useState<FileItem[] | null>(null);
+
+  // Map OS drive path to workspace relative path
+  const resolveWorkspacePath = (p: string): string => {
+    if (p === "home") return "";
+    if (p.startsWith("home/")) return p.replace(/^home\//, "");
+    if (p === "data") return "db";
+    if (p === "workflows") return "detect";
+    if (p === "applications") return "orchestrator";
+    if (p === "integrations") return "ingest";
+    if (p === "enterprise") return "security";
+    return p;
+  };
+
+  const loadRealFiles = useCallback(async (path: string) => {
+    try {
+      const relPath = resolveWorkspacePath(path);
+      const res = await api.fsList(relPath).catch(() => null);
+      if (res && res.entries && res.entries.length > 0) {
+        const mapped: FileItem[] = res.entries.map((e: FSEntry) => ({
+          id: e.name,
+          name: e.name,
+          type: e.type === "directory" ? "folder" : "file",
+          meta: e.type === "directory" ? "Directory" : (e.size_human || "File"),
+          size: e.size_human || undefined,
+          updated: new Date(e.modified * 1000).toLocaleDateString(),
+          category: e.extension,
+        }));
+        setRealFiles(mapped);
+        return;
+      }
+    } catch {
+      // fallback
+    }
+    setRealFiles(null);
+  }, []);
+
+  useEffect(() => {
+    loadRealFiles(currentPath);
+  }, [currentPath, loadRealFiles]);
+
   const currentFiles = useMemo(() => {
+    if (realFiles && realFiles.length > 0) return realFiles;
     return filesystemData[currentPath] || filesystemData.home;
-  }, [currentPath]);
+  }, [realFiles, currentPath]);
 
   const filteredFiles = useMemo(() => {
     if (!searchQuery.trim()) return currentFiles;
@@ -367,9 +410,20 @@ export function FileSystemWindow({
     }
   };
 
-  const handleItemClick = (item: FileItem) => {
+  const handleItemClick = async (item: FileItem) => {
     setSelectedItem(item.name);
     if (item.type === "file") {
+      const relPath = resolveWorkspacePath(currentPath);
+      const filePath = relPath ? `${relPath}/${item.name}` : item.name;
+      try {
+        const fileData = await api.fsRead(filePath).catch(() => null);
+        if (fileData?.content) {
+          onOpenFile?.(item.name, fileData.content);
+          return;
+        }
+      } catch {
+        // fallback
+      }
       onOpenFile?.(item.name, item.rawContent);
     } else {
       const nextPath = `${currentPath}/${item.id}`;

@@ -1,8 +1,8 @@
 """
 EIOS Docker Integration Layer
 ------------------------------
-Talks to the Docker Engine API (via Unix socket on Linux/Mac or named pipe on Windows)
-to provide real container discovery, stats, and lifecycle management.
+Uses the official Docker Python SDK (docker-py) which handles both
+Windows named pipes (//./pipe/docker_engine) and Unix sockets transparently.
 
 Endpoints:
   GET  /api/docker/containers        – list all containers with status
@@ -13,169 +13,140 @@ Endpoints:
   POST /api/docker/containers/{id}/restart
   GET  /api/docker/networks          – list Docker networks
   GET  /api/docker/volumes           – list Docker volumes
+  GET  /api/docker/info              – Docker Engine system info
 """
 
 from __future__ import annotations
 
 import logging
-import os
-import platform
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, HTTPException
 
 log = logging.getLogger("eios.docker")
 
 router = APIRouter(prefix="/api/docker", tags=["docker"])
 
-# ── Docker socket transport ────────────────────────────────────────────────────
-def _docker_transport() -> httpx.AsyncHTTPTransport | None:
-    """Return the correct transport for the local Docker Engine."""
-    system = platform.system()
-    if system == "Windows":
-        # Windows Docker Desktop exposes a named pipe
-        pipe = r"//./pipe/docker_engine"
-        try:
-            return httpx.AsyncHTTPTransport(uds=pipe)
-        except Exception:
-            # Fallback: Docker Desktop also listens on TCP by default
-            return None
-    else:
-        # Linux / macOS
-        sock = "/var/run/docker.sock"
-        if os.path.exists(sock):
-            return httpx.AsyncHTTPTransport(uds=sock)
-    return None
+# ── Docker SDK client (lazy, cached) ─────────────────────────────────────────
+_docker_client = None
 
 
-# Docker TCP fallback (Docker Desktop on Windows can expose port 2375)
-DOCKER_TCP = os.getenv("DOCKER_HOST", "http://localhost:2375")
-DOCKER_UNIX_BASE = "http://docker"          # used with UDS transport
-
-
-async def _docker_get(path: str) -> Any:
-    transport = _docker_transport()
+def _get_client():
+    """Return a cached docker.DockerClient, or raise 503 if unavailable."""
+    global _docker_client
     try:
-        if transport:
-            async with httpx.AsyncClient(transport=transport, base_url=DOCKER_UNIX_BASE) as client:
-                r = await client.get(path, timeout=5.0)
-                r.raise_for_status()
-                return r.json()
-        else:
-            # Fall back to TCP
-            async with httpx.AsyncClient(base_url=DOCKER_TCP) as client:
-                r = await client.get(path, timeout=5.0)
-                r.raise_for_status()
-                return r.json()
-    except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="Docker Engine not reachable. Ensure Docker Desktop is running.")
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+        import docker
+        if _docker_client is None:
+            _docker_client = docker.from_env()
+        # Ping to verify connection
+        _docker_client.ping()
+        return _docker_client
+    except ImportError:
+        raise HTTPException(status_code=503, detail="docker package not installed. Run: pip install docker")
+    except Exception as e:
+        _docker_client = None  # Reset so next call retries
+        raise HTTPException(status_code=503, detail=f"Docker Engine not reachable: {e}. Ensure Docker Desktop is running.")
 
 
-async def _docker_post(path: str) -> Any:
-    transport = _docker_transport()
-    try:
-        if transport:
-            async with httpx.AsyncClient(transport=transport, base_url=DOCKER_UNIX_BASE) as client:
-                r = await client.post(path, timeout=10.0)
-                if r.status_code not in (200, 204):
-                    r.raise_for_status()
-                return {"status": "ok"}
-        else:
-            async with httpx.AsyncClient(base_url=DOCKER_TCP) as client:
-                r = await client.post(path, timeout=10.0)
-                if r.status_code not in (200, 204):
-                    r.raise_for_status()
-                return {"status": "ok"}
-    except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="Docker Engine not reachable.")
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+def _parse_container(c) -> dict:
+    """Normalize a docker-py Container object into EIOS format."""
+    attrs = c.attrs or {}
+    config = attrs.get("Config", {}) or {}
+    network_settings = attrs.get("NetworkSettings", {}) or {}
+    host_config = attrs.get("HostConfig", {}) or {}
+    state = attrs.get("State", {}) or {}
 
+    # Ports from NetworkSettings
+    ports_map = network_settings.get("Ports") or {}
+    port_parts = []
+    for container_port, bindings in ports_map.items():
+        if bindings:
+            for b in bindings:
+                host_port = b.get("HostPort", "")
+                if host_port:
+                    port_parts.append(f"{host_port}:{container_port.split('/')[0]}")
+    port_str = ", ".join(port_parts) or "—"
 
-def _parse_container(c: dict) -> dict:
-    """Normalize a Docker container object into EIOS format."""
-    names = c.get("Names", [])
-    name = names[0].lstrip("/") if names else c.get("Id", "")[:12]
+    status = c.status.lower()
+    running = state.get("Running", False)
 
-    ports = c.get("Ports", [])
-    port_str = ", ".join(
-        f"{p.get('PublicPort', '')}:{p.get('PrivatePort', '')}"
-        for p in ports
-        if p.get("PublicPort")
-    ) or "—"
-
-    state = c.get("State", "unknown").lower()
-    status_map = {
-        "running": "running",
-        "exited": "stopped",
-        "paused": "paused",
-        "restarting": "restarting",
-        "dead": "dead",
-        "created": "created",
-    }
-    status = status_map.get(state, state)
-
-    labels = c.get("Labels", {}) or {}
+    labels = config.get("Labels") or {}
     compose_service = labels.get("com.docker.compose.service", "")
     compose_project = labels.get("com.docker.compose.project", "")
 
+    name = c.name or c.short_id or ""
+    image_tag = ""
+    try:
+        tags = c.image.tags
+        image_tag = tags[0] if tags else (c.image.short_id or "")
+    except Exception:
+        image_tag = config.get("Image", "")
+
     return {
-        "id": c.get("Id", "")[:12],
-        "full_id": c.get("Id", ""),
+        "id": c.short_id,
+        "full_id": c.id,
         "name": name,
-        "image": c.get("Image", ""),
+        "image": image_tag,
         "status": status,
-        "state": state,
+        "state": "running" if running else status,
         "ports": port_str,
-        "created": c.get("Created", 0),
-        "uptime": c.get("Status", ""),
+        "created": attrs.get("Created", ""),
+        "uptime": state.get("StartedAt", ""),
         "compose_service": compose_service,
         "compose_project": compose_project,
         "labels": labels,
         "otlp_connected": any(
-            kw in (c.get("Image", "") + name).lower()
+            kw in (image_tag + name).lower()
             for kw in ["otel", "opentelemetry", "jaeger", "prometheus"]
         ),
-        "category": _infer_category(name, c.get("Image", ""), labels),
+        "category": _infer_category(name, image_tag, labels),
     }
 
 
 def _infer_category(name: str, image: str, labels: dict) -> str:
     combined = (name + image).lower()
-    if any(kw in combined for kw in ["postgres", "mysql", "redis", "mongo", "db"]):
+    if any(kw in combined for kw in ["postgres", "mysql", "redis", "mongo", "valkey", "db"]):
         return "database"
     if any(kw in combined for kw in ["kafka", "zookeeper", "collector", "prometheus", "jaeger",
-                                       "grafana", "otel", "opensearch"]):
+                                      "grafana", "otel", "opensearch", "flagd"]):
         return "infra"
     return "app"
-
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/containers")
-async def list_containers(all: bool = True) -> list[dict]:
+def list_containers(all: bool = True) -> list[dict]:
     """List all Docker containers (running + stopped if all=True)."""
-    params = "?all=true" if all else ""
-    data = await _docker_get(f"/containers/json{params}")
-    return [_parse_container(c) for c in data]
+    client = _get_client()
+    containers = client.containers.list(all=all)
+    return [_parse_container(c) for c in containers]
 
 
 @router.get("/containers/{container_id}/stats")
-async def container_stats(container_id: str) -> dict:
+def container_stats(container_id: str) -> dict:
     """Get real-time CPU & memory for a single container (one-shot, no stream)."""
-    data = await _docker_get(f"/containers/{container_id}/stats?stream=false")
+    client = _get_client()
+    try:
+        container = client.containers.get(container_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Container not found: {e}")
+
+    try:
+        data = container.stats(stream=False)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Could not fetch stats: {e}")
 
     # CPU calculation
-    cpu_delta = data["cpu_stats"]["cpu_usage"]["total_usage"] - \
-                data["precpu_stats"]["cpu_usage"]["total_usage"]
-    system_delta = data["cpu_stats"].get("system_cpu_usage", 0) - \
-                   data["precpu_stats"].get("system_cpu_usage", 0)
-    num_cpus = data["cpu_stats"].get("online_cpus") or \
-               len(data["cpu_stats"]["cpu_usage"].get("percpu_usage", [1]))
-    cpu_pct = (cpu_delta / system_delta * num_cpus * 100.0) if system_delta > 0 else 0.0
+    try:
+        cpu_delta = data["cpu_stats"]["cpu_usage"]["total_usage"] - \
+                    data["precpu_stats"]["cpu_usage"]["total_usage"]
+        system_delta = data["cpu_stats"].get("system_cpu_usage", 0) - \
+                       data["precpu_stats"].get("system_cpu_usage", 0)
+        num_cpus = data["cpu_stats"].get("online_cpus") or \
+                   len(data["cpu_stats"]["cpu_usage"].get("percpu_usage", [1]))
+        cpu_pct = (cpu_delta / system_delta * num_cpus * 100.0) if system_delta > 0 else 0.0
+    except (KeyError, ZeroDivisionError):
+        cpu_pct = 0.0
 
     # Memory
     mem = data.get("memory_stats", {})
@@ -204,88 +175,112 @@ async def container_stats(container_id: str) -> dict:
 
 
 @router.get("/stats")
-async def all_container_stats() -> list[dict]:
+def all_container_stats() -> list[dict]:
     """Lightweight CPU/memory summary for all running containers."""
-    import asyncio
-    containers_raw = await _docker_get("/containers/json")  # running only
-    container_ids = [(c["Id"][:12], c["Id"]) for c in containers_raw]
+    client = _get_client()
+    containers = client.containers.list(all=False)  # running only
 
-    async def fetch_one(short_id: str, full_id: str) -> dict:
+    results = []
+    for c in containers:
         try:
-            s = await container_stats(full_id)
-            s["id"] = short_id
-            return s
+            s = container_stats(c.short_id)
+            s["id"] = c.short_id
+            results.append(s)
         except Exception:
-            return {"id": short_id, "cpu_pct": 0.0, "memory_mb": 0, "memory_pct": 0.0}
-
-    results = await asyncio.gather(*[fetch_one(sid, fid) for sid, fid in container_ids])
-    return list(results)
+            results.append({"id": c.short_id, "cpu_pct": 0.0, "memory_mb": 0, "memory_pct": 0.0})
+    return results
 
 
 @router.post("/containers/{container_id}/start")
-async def start_container(container_id: str) -> dict:
-    result = await _docker_post(f"/containers/{container_id}/start")
-    log.info("started container %s", container_id)
-    return result
+def start_container(container_id: str) -> dict:
+    client = _get_client()
+    try:
+        container = client.containers.get(container_id)
+        container.start()
+        log.info("started container %s", container_id)
+        return {"id": container_id, "action": "start", "status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start container: {e}")
 
 
 @router.post("/containers/{container_id}/stop")
-async def stop_container(container_id: str) -> dict:
-    result = await _docker_post(f"/containers/{container_id}/stop")
-    log.info("stopped container %s", container_id)
-    return result
+def stop_container(container_id: str) -> dict:
+    client = _get_client()
+    try:
+        container = client.containers.get(container_id)
+        container.stop()
+        log.info("stopped container %s", container_id)
+        return {"id": container_id, "action": "stop", "status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to stop container: {e}")
 
 
 @router.post("/containers/{container_id}/restart")
-async def restart_container(container_id: str) -> dict:
-    result = await _docker_post(f"/containers/{container_id}/restart")
-    log.info("restarted container %s", container_id)
-    return result
+def restart_container(container_id: str) -> dict:
+    client = _get_client()
+    try:
+        container = client.containers.get(container_id)
+        container.restart()
+        log.info("restarted container %s", container_id)
+        return {"id": container_id, "action": "restart", "status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to restart container: {e}")
 
 
 @router.get("/networks")
-async def list_networks() -> list[dict]:
-    data = await _docker_get("/networks")
-    return [
-        {
-            "id": n.get("Id", "")[:12],
-            "name": n.get("Name", ""),
-            "driver": n.get("Driver", ""),
-            "scope": n.get("Scope", ""),
-            "containers": len(n.get("Containers", {})),
-        }
-        for n in data
-    ]
+def list_networks() -> list[dict]:
+    client = _get_client()
+    try:
+        networks = client.networks.list()
+        return [
+            {
+                "id": n.id[:12] if n.id else "",
+                "name": n.name or "",
+                "driver": n.attrs.get("Driver", ""),
+                "scope": n.attrs.get("Scope", ""),
+                "containers": len(n.attrs.get("Containers", {})),
+            }
+            for n in networks
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Failed to list networks: {e}")
 
 
 @router.get("/volumes")
-async def list_volumes() -> list[dict]:
-    data = await _docker_get("/volumes")
-    vols = data.get("Volumes", []) or []
-    return [
-        {
-            "name": v.get("Name", ""),
-            "driver": v.get("Driver", ""),
-            "mountpoint": v.get("Mountpoint", ""),
-            "created": v.get("CreatedAt", ""),
-        }
-        for v in vols
-    ]
+def list_volumes() -> list[dict]:
+    client = _get_client()
+    try:
+        vols = client.volumes.list()
+        return [
+            {
+                "name": v.name or "",
+                "driver": v.attrs.get("Driver", ""),
+                "mountpoint": v.attrs.get("Mountpoint", ""),
+                "created": v.attrs.get("CreatedAt", ""),
+            }
+            for v in vols
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Failed to list volumes: {e}")
 
 
 @router.get("/info")
-async def docker_info() -> dict:
+def docker_info() -> dict:
     """Return Docker Engine system info."""
-    data = await _docker_get("/info")
-    return {
-        "containers": data.get("Containers", 0),
-        "containers_running": data.get("ContainersRunning", 0),
-        "containers_paused": data.get("ContainersPaused", 0),
-        "containers_stopped": data.get("ContainersStopped", 0),
-        "images": data.get("Images", 0),
-        "server_version": data.get("ServerVersion", ""),
-        "os": data.get("OperatingSystem", ""),
-        "architecture": data.get("Architecture", ""),
-        "mem_total_gb": round(data.get("MemTotal", 0) / 1024 / 1024 / 1024, 2),
-        "cpus": data.get("NCPU", 0),
-    }
+    client = _get_client()
+    try:
+        data = client.info()
+        return {
+            "containers": data.get("Containers", 0),
+            "containers_running": data.get("ContainersRunning", 0),
+            "containers_paused": data.get("ContainersPaused", 0),
+            "containers_stopped": data.get("ContainersStopped", 0),
+            "images": data.get("Images", 0),
+            "server_version": data.get("ServerVersion", ""),
+            "os": data.get("OperatingSystem", ""),
+            "architecture": data.get("Architecture", ""),
+            "mem_total_gb": round(data.get("MemTotal", 0) / 1024 / 1024 / 1024, 2),
+            "cpus": data.get("NCPU", 0),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Failed to fetch Docker info: {e}")

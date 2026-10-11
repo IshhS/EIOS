@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   CheckCircle2,
   Lock,
@@ -9,6 +9,7 @@ import {
   CloudLightning,
   ShieldAlert,
 } from "lucide-react";
+import { api, type Incident } from "@/lib/api";
 
 interface OSRightSidebarProps {
   onOpenSettings?: () => void;
@@ -33,6 +34,28 @@ export function OSRightSidebar({
   totalServicesCount = 52,
   healthScore = 94,
 }: OSRightSidebarProps) {
+  const [liveUptime, setLiveUptime] = useState("2d 08h 14m");
+  const [liveIncidents, setLiveIncidents] = useState<Incident[]>([]);
+
+  useEffect(() => {
+    const fetchSidebarData = async () => {
+      try {
+        const [inc, upt] = await Promise.all([
+          api.incidents(4).catch(() => []),
+          api.terminalExec("uptime").catch(() => null),
+        ]);
+        if (inc && inc.length > 0) setLiveIncidents(inc);
+        if (upt?.output && upt.output.includes("uptime:")) {
+          setLiveUptime(upt.output.replace("System uptime: ", ""));
+        }
+      } catch {
+        // fallback
+      }
+    };
+    fetchSidebarData();
+    const timer = setInterval(fetchSidebarData, 8000);
+    return () => clearInterval(timer);
+  }, []);
   return (
     <aside className="relative z-20 flex w-72 flex-col gap-2 py-2 pr-3 select-none overflow-y-auto scrollbar-themed bg-[#010610]/70 border-l border-[#0d2e49]/60">
       {/* 1. Profile Card with Realistic Solid Titanium Executive Seal (No Glow) */}
@@ -71,7 +94,7 @@ export function OSRightSidebar({
         <div className="space-y-1.5 text-xs">
           <div className="flex items-center justify-between">
             <span className="text-slate-400">Uptime</span>
-            <span className="font-mono text-slate-200">23d 14h 27m</span>
+            <span className="font-mono text-slate-200">{liveUptime}</span>
           </div>
 
           <div>
@@ -96,7 +119,7 @@ export function OSRightSidebar({
 
           <div className="flex items-center justify-between">
             <span className="text-slate-400">Pending Alerts</span>
-            <span className="font-mono text-[#F08A7C] font-bold">3</span>
+            <span className="font-mono text-[#F08A7C] font-bold">{liveIncidents.length || 0}</span>
           </div>
         </div>
       </div>
@@ -168,25 +191,31 @@ export function OSRightSidebar({
         </span>
 
         <div className="space-y-1 text-xs">
-          <div className="flex items-start gap-1.5 py-0.5">
-            <span className="text-[#E04A5F] text-xs font-bold">▲</span>
-            <div className="flex-1 min-w-0">
-              <span className="text-[10.5px] text-slate-200 block truncate">
-                High memory usage detected
-              </span>
-              <span className="text-[8.5px] text-slate-400 font-mono">2m ago</span>
-            </div>
-          </div>
-
-          <div className="flex items-start gap-1.5 py-0.5">
-            <span className="text-[#F08A7C] text-xs font-bold">▲</span>
-            <div className="flex-1 min-w-0">
-              <span className="text-[10.5px] text-slate-200 block truncate">
-                Failed login attempt detected
-              </span>
-              <span className="text-[8.5px] text-slate-400 font-mono">15m ago</span>
-            </div>
-          </div>
+          {liveIncidents.length > 0 ? (
+            liveIncidents.slice(0, 2).map((inc) => (
+              <div key={inc.incident_id} className="flex items-start gap-1.5 py-0.5">
+                <span className={`text-xs font-bold ${inc.severity === "critical" || inc.severity === "high" ? "text-[#E04A5F]" : "text-[#F08A7C]"}`}>▲</span>
+                <div className="flex-1 min-w-0">
+                  <span className="text-[10.5px] text-slate-200 block truncate">
+                    {inc.title}
+                  </span>
+                  <span className="text-[8.5px] text-slate-400 font-mono">{inc.entity_service || "system"}</span>
+                </div>
+              </div>
+            ))
+          ) : (
+            <>
+              <div className="flex items-start gap-1.5 py-0.5">
+                <span className="text-[#B5E3C8] text-xs font-bold">●</span>
+                <div className="flex-1 min-w-0">
+                  <span className="text-[10.5px] text-slate-200 block truncate">
+                    All microservices within thresholds
+                  </span>
+                  <span className="text-[8.5px] text-slate-400 font-mono">Continuous</span>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {onOpenAlerts && (

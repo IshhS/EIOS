@@ -31,6 +31,9 @@ from docker_router import router as docker_router
 from system_router import router as system_router
 from terminal_router import router as terminal_router
 from fs_router import router as fs_router
+from services_router import router as services_router
+from agents_router import router as agents_router
+from auth_router import router as auth_router
 
 logging.basicConfig(
     level=config.LOG_LEVEL,
@@ -144,6 +147,9 @@ app.include_router(docker_router)
 app.include_router(system_router)
 app.include_router(terminal_router)
 app.include_router(fs_router)
+app.include_router(services_router)
+app.include_router(agents_router)
+app.include_router(auth_router)
 
 
 class StartFault(BaseModel):

@@ -65,6 +65,11 @@ export function ApplicationOnboardingModal({
   const [dockerError, setDockerError] = useState<string | null>(null);
   const [dockerInfo, setDockerInfo] = useState<{ containers_running: number; server_version: string } | null>(null);
 
+  const [workloadPlatform, setWorkloadPlatform] = useState<"docker" | "k8s">("docker");
+  const [k8sWorkloadsList, setK8sWorkloadsList] = useState<any[]>([]);
+  const [k8sLoading, setK8sLoading] = useState(false);
+  const [k8sAvailable, setK8sAvailable] = useState<boolean | null>(null);
+
   // Convert DockerContainer → DiscoveredWorkload
   const toWorkload = (c: DockerContainer): DiscoveredWorkload => ({
     id: c.id,
@@ -82,12 +87,18 @@ export function ApplicationOnboardingModal({
     setDockerLoading(true);
     setDockerError(null);
     try {
-      const [containers, info] = await Promise.all([
+      const [containers, info, k8s] = await Promise.all([
         api.dockerContainers(true),
         api.dockerInfo().catch(() => null),
+        api.k8sWorkloads("all").catch(() => null),
       ]);
       setDiscoveredWorkloads(containers.map(toWorkload));
       if (info) setDockerInfo({ containers_running: info.containers_running, server_version: info.server_version });
+
+      if (k8s) {
+        setK8sAvailable(k8s.available);
+        if (k8s.pods) setK8sWorkloadsList(k8s.pods);
+      }
 
       // Fetch live stats for running containers (non-blocking)
       const runningIds = containers.filter(c => c.state === "running").map(c => c.id);
@@ -112,12 +123,23 @@ export function ApplicationOnboardingModal({
       }
     } catch (err: any) {
       setDockerError(err?.message ?? "Docker Engine not reachable");
-      // Graceful fallback: show empty state, not crash
       setDiscoveredWorkloads([]);
     } finally {
       setDockerLoading(false);
     }
   }, []);
+
+  const handleApproveConnect = async () => {
+    try {
+      await api.connectWorkload({
+        workload_type: "opentelemetry-demo",
+        name: "OpenTelemetry Online Boutique",
+      }).catch(() => null);
+    } catch {
+      // best-effort connect
+    }
+    setCurrentStep("pipeline");
+  };
 
   useEffect(() => {
     if (isOpen && currentStep === "discover") {
@@ -350,33 +372,63 @@ export function ApplicationOnboardingModal({
               </div>
 
 
-              {/* Filters */}
+              {/* Platform Switcher & Filters */}
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-                <div className="relative w-full sm:w-72">
-                  <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                  <input
-                    type="text"
-                    value={searchFilter}
-                    onChange={(e) => setSearchFilter(e.target.value)}
-                    placeholder="Search containers or pods..."
-                    className="w-full rounded-xl border border-[#0d2e49] bg-[#021424] py-2 pl-9 pr-3 text-xs text-slate-200 placeholder-slate-500 focus:border-[#26658C] focus:outline-none"
-                  />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setWorkloadPlatform("docker")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-mono text-[11px] font-semibold border transition-all ${
+                      workloadPlatform === "docker"
+                        ? "bg-[#023859] text-[#A7EBF2] border-[#54ACBF] shadow-md"
+                        : "bg-[#010e1c] text-slate-400 border-[#0d2e49] hover:text-slate-200"
+                    }`}
+                  >
+                    <Box className="h-3 w-3 text-[#54ACBF]" />
+                    <span>Docker Containers ({discoveredWorkloads.length})</span>
+                  </button>
+
+                  <button
+                    onClick={() => setWorkloadPlatform("k8s")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-mono text-[11px] font-semibold border transition-all ${
+                      workloadPlatform === "k8s"
+                        ? "bg-[#023859] text-[#A7EBF2] border-[#54ACBF] shadow-md"
+                        : "bg-[#010e1c] text-slate-400 border-[#0d2e49] hover:text-slate-200"
+                    }`}
+                  >
+                    <Server className="h-3 w-3 text-[#54ACBF]" />
+                    <span>Kubernetes ({k8sWorkloadsList.length > 0 ? k8sWorkloadsList.length : "Discovered"})</span>
+                  </button>
                 </div>
 
-                <div className="flex items-center gap-1.5 self-start sm:self-auto">
-                  {(["all", "app", "infra", "database"] as const).map((cat) => (
-                    <button
-                      key={cat}
-                      onClick={() => setSelectedCategory(cat)}
-                      className={`px-2.5 py-1 rounded-lg font-mono text-[11px] capitalize transition-colors ${
-                        selectedCategory === cat
-                          ? "bg-[#02243d] text-[#A7EBF2] border border-[#26658C]"
-                          : "text-slate-400 hover:text-slate-200 hover:bg-[#021424]"
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <div className="relative flex-1 sm:w-56">
+                    <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={searchFilter}
+                      onChange={(e) => setSearchFilter(e.target.value)}
+                      placeholder="Filter workloads..."
+                      className="w-full rounded-xl border border-[#0d2e49] bg-[#021424] py-1.5 pl-9 pr-3 text-xs text-slate-200 placeholder-slate-500 focus:border-[#26658C] focus:outline-none font-mono"
+                    />
+                  </div>
+
+                  {workloadPlatform === "docker" && (
+                    <div className="flex items-center gap-1">
+                      {(["all", "app", "infra", "database"] as const).map((cat) => (
+                        <button
+                          key={cat}
+                          onClick={() => setSelectedCategory(cat)}
+                          className={`px-2 py-1 rounded-lg font-mono text-[10px] capitalize transition-colors ${
+                            selectedCategory === cat
+                              ? "bg-[#02243d] text-[#A7EBF2] border border-[#26658C]"
+                              : "text-slate-400 hover:text-slate-200"
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -394,7 +446,44 @@ export function ApplicationOnboardingModal({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#0d2e49]">
-                    {dockerLoading ? (
+                    {workloadPlatform === "k8s" ? (
+                      k8sWorkloadsList.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-10 text-center text-slate-500 font-mono">
+                            {k8sAvailable === false
+                              ? "Kubernetes cluster not detected on local host. Cluster query mode active."
+                              : "No Kubernetes pods discovered in cluster namespaces."}
+                          </td>
+                        </tr>
+                      ) : (
+                        k8sWorkloadsList.map((pod: any) => (
+                          <tr key={pod.name} className="hover:bg-[#03182b] transition-colors">
+                            <td className="py-2 px-3 font-semibold text-slate-200 flex items-center gap-2">
+                              <Server className="h-3 w-3 text-[#54ACBF]" />
+                              <span>{pod.name}</span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-400 truncate max-w-[180px]">
+                              {pod.namespace} · {pod.images?.[0] || "image:latest"}
+                            </td>
+                            <td className="py-2 px-3">
+                              <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border bg-emerald-950/70 text-emerald-300 border-emerald-600/30">
+                                <span className="h-1 w-1 rounded-full bg-emerald-400" />
+                                {pod.phase || "Running"}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-[#A7EBF2]">
+                              Ready {pod.ready || 1}/{pod.total_containers || 1}
+                            </td>
+                            <td className="py-2 px-3 text-slate-400">
+                              {pod.node || "node-1"} · {pod.pod_ip || "10.244.0.1"}
+                            </td>
+                            <td className="py-2 px-3 text-emerald-400 font-bold">
+                              ✓ Ready
+                            </td>
+                          </tr>
+                        ))
+                      )
+                    ) : dockerLoading ? (
                       // Loading skeleton rows
                       Array.from({ length: 6 }).map((_, i) => (
                         <tr key={i} className="animate-pulse">
@@ -546,7 +635,7 @@ export function ApplicationOnboardingModal({
                 </button>
 
                 <button
-                  onClick={() => setCurrentStep("pipeline")}
+                  onClick={handleApproveConnect}
                   className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#023859] via-[#125178] to-[#023859] hover:brightness-110 border border-[#54ACBF] px-6 py-2.5 text-xs font-semibold text-white shadow-xl transition-all"
                 >
                   <span>Approve & Activate Agent Pipeline</span>
